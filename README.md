@@ -1,27 +1,52 @@
-# opencode plugin for Claude Code
+# opencode-plugin-cc
 
-Use [opencode](https://opencode.ai) from inside Claude Code for code reviews or to delegate tasks —
-a port of [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) that drives your local
-`opencode` CLI instead of Codex.
+**Run [opencode](https://opencode.ai) as a subagent inside [Claude Code](https://claude.com/claude-code).**
 
-## What You Get
+Get a second opinion on your diff, or hand off a long task to a different model — without leaving Claude Code.
 
-- `/opencode:review` — normal read-only opencode review
-- `/opencode:adversarial-review` — steerable challenge review
-- `/opencode:rescue` — delegate work to opencode through the `opencode:opencode-rescue` subagent
-- `/opencode:status`, `/opencode:result`, `/opencode:cancel` — manage background jobs
-- `/opencode:setup` — readiness check and the optional stop-time review gate
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](#license)
+[![Node](https://img.shields.io/badge/node-%3E%3D18.18-brightgreen.svg)](#requirements)
+
+> A community port of [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) that drives your local `opencode` CLI instead of Codex. Not affiliated with OpenAI, Anthropic, or the opencode project.
+
+---
+
+## Why
+
+Claude Code is good at writing code, and less good at grading its own homework. This plugin puts a second, independent model in the loop:
+
+- **Review** — a fresh agent reads your diff with no memory of why you wrote it that way.
+- **Delegate** — long or grindy tasks run in the background on a cheaper model while Claude stays responsive.
+- **Second opinion** — different provider, different failure modes. Any provider `opencode` supports works, including the OpenCode Go plan (`opencode-go/*`).
+
+## Features
+
+| Command | What it does |
+| --- | --- |
+| `/opencode:review` | Read-only review of your working tree or branch diff |
+| `/opencode:adversarial-review` | Same, but the prompt attacks the design: tradeoffs, assumptions, failure modes |
+| `/opencode:rescue` | Hand a task to opencode (write-capable by default) |
+| `/opencode:status` | List background jobs |
+| `/opencode:result` | Print a finished job's output |
+| `/opencode:cancel` | Kill a running job |
+| `/opencode:setup` | Readiness check + toggle the optional stop-time review gate |
+
+Plus the `opencode-rescue` subagent, so plain English works too: *"Ask opencode to redesign the DB connection to be more resilient."*
 
 ## Requirements
 
-- `opencode` CLI on `PATH`, signed in (`opencode providers login`). Any provider works — including the
-  OpenCode Go plan (`opencode-go/*` models).
-- Node.js 18.18+
+- [Claude Code](https://claude.com/claude-code)
+- [`opencode`](https://opencode.ai) CLI on `PATH`, signed in (`opencode providers login`)
+- Node.js ≥ 18.18
+
+No other dependencies. The plugin is ~400 lines of Node stdlib.
 
 ## Install
 
+From this marketplace:
+
 ```bash
-/plugin marketplace add /Users/hieuvu7/myproject/opencod-plugin-cc
+/plugin marketplace add hieuvu7/opencode-plugin-cc
 ```
 
 ```bash
@@ -32,57 +57,56 @@ a port of [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) 
 /reload-plugins
 ```
 
-Then:
+Then verify your setup:
 
 ```bash
 /opencode:setup
 ```
 
-## Usage
-
-### `/opencode:review`
-
-Read-only review of your current work. Runs opencode's `plan` agent, which inspects the diff with git itself.
+Or from a local clone — point the marketplace at the checkout, and edits to the plugin apply without reinstalling:
 
 ```bash
-/opencode:review
-/opencode:review --base main
-/opencode:review --background
+git clone https://github.com/hieuvu7/opencode-plugin-cc.git
 ```
 
-Multi-file reviews take a while — prefer `--background`, then `/opencode:status` and `/opencode:result`.
+```bash
+/plugin marketplace add /absolute/path/to/opencode-plugin-cc
+```
 
-### `/opencode:adversarial-review`
+## Usage
 
-Same target selection, but the prompt challenges the approach: design choices, tradeoffs, hidden
-assumptions, failure modes. Accepts extra focus text after the flags.
+### Reviews
+
+```bash
+/opencode:review                    # uncommitted working tree
+/opencode:review --base main        # everything on this branch
+/opencode:review --background       # returns a job id immediately
+```
+
+opencode's read-only `plan` agent inspects the diff with git itself, so nothing gets edited. Multi-file reviews take a while — prefer `--background`, then `/opencode:status` and `/opencode:result`.
+
+Adversarial mode takes optional focus text after the flags:
 
 ```bash
 /opencode:adversarial-review --base main challenge the caching and retry design
 /opencode:adversarial-review --background look for race conditions
 ```
 
-### `/opencode:rescue`
-
-Hands a task to opencode via the rescue subagent. Write-capable by default (opencode `build` agent);
-add `--read-only` for investigation only.
+### Delegating work
 
 ```bash
 /opencode:rescue investigate why the tests started failing
+/opencode:rescue --read-only dig into the regression
 /opencode:rescue --model opencode-go/kimi-k3 --variant high fix the flaky integration test
 /opencode:rescue --resume apply the top fix from the last run
-/opencode:rescue --background --read-only dig into the regression
 ```
 
-Or just ask: `Ask opencode to redesign the DB connection to be more resilient.`
-
-Notes:
-
-- omit `--model` / `--variant` and opencode uses your own config defaults
-- models are `provider/model` (`opencode models` lists them)
+- write-capable by default (opencode `build` agent); `--read-only` for investigation only
+- omit `--model` / `--variant` and your own opencode config defaults apply
+- models are `provider/model` — run `opencode models` to list them
 - `--resume` continues the newest opencode thread from this repo; `--fresh` forces a new one
 
-### `/opencode:status`, `/opencode:result`, `/opencode:cancel`
+### Managing jobs
 
 ```bash
 /opencode:status
@@ -90,50 +114,62 @@ Notes:
 /opencode:cancel
 ```
 
-`/opencode:result` prints the stored output plus `opencode --session <id>` so you can continue the same
-thread in the opencode TUI.
+`/opencode:result` prints the stored output plus an `opencode --session <id>` command, so you can pick up the same thread in the opencode TUI.
 
-### `/opencode:setup`
-
-Checks the CLI and credentials, and toggles the optional review gate:
+### The review gate (optional)
 
 ```bash
 /opencode:setup --enable-review-gate
 /opencode:setup --disable-review-gate
 ```
 
-With the gate enabled, a `Stop` hook runs a working-tree review when Claude tries to finish. A verdict of
-`FIX FIRST` blocks the stop so Claude addresses the findings.
+With the gate on, a `Stop` hook runs a working-tree review whenever Claude tries to finish. A verdict of `FIX FIRST` blocks the stop and feeds the findings back so Claude addresses them.
 
 > [!WARNING]
-> The gate can create a long Claude/opencode loop and burn quota. Only enable it while watching the session.
+> The gate can create a long Claude↔opencode loop and burn quota. Only enable it while you are watching the session. It is off by default.
 
-## How It Works
+## How it works
 
-`plugins/opencode/scripts/opencode-companion.mjs` shells out to:
-
-```bash
-opencode run --format json --auto --agent <plan|build> [--model ...] [--variant ...] [--session ...] "<prompt>"
+```
+Claude Code
+  └─ commands / opencode-rescue subagent
+       └─ scripts/opencode-companion.mjs
+            └─ opencode run --format json --auto --agent <plan|build> …
 ```
 
-It folds the NDJSON event stream into a result, and stores jobs (id, status, session id, output) under
-`$CLAUDE_PLUGIN_DATA/state/<repo>-<hash>/`. `--background` re-execs the companion detached and returns a
-job id immediately.
+The companion spawns the CLI, folds its NDJSON event stream into a single result, and stores jobs (id, status, session id, output) under a per-workspace state directory. `--background` re-execs the companion detached and returns a job id right away. Your own `opencode.json` and agent config are used as-is.
 
-Two details that matter for headless opencode:
+Two details that matter for headless opencode, learned the hard way:
 
-- stdin is closed — `opencode run` hangs forever on an inherited non-TTY stdin
-- `--auto` is passed so permission prompts never block a headless run
-
-Your own `opencode.json` / agent config is used as-is.
+- **stdin is closed** — `opencode run` hangs forever on an inherited non-TTY stdin.
+- **`--auto` is passed** — otherwise permission prompts block a run with nobody there to answer.
 
 ## Differences from the Codex plugin
 
-- no `/codex:transfer` equivalent — opencode's `import` takes its own export format, not Claude's `.jsonl`
-- one companion script over the plain CLI instead of the Codex app-server JSON-RPC broker
+- No `/transfer` equivalent — opencode's `import` consumes its own export format, not Claude's `.jsonl`.
+- One companion script over the plain CLI, instead of the Codex app-server JSON-RPC broker (~400 lines vs ~6k).
 
-## Test
+## Development
 
 ```bash
 npm test
 ```
+
+Pure `node:test`, no framework. Contributions welcome — issues and PRs are the right place for bugs, new commands, and provider quirks. Keep the dependency count at zero.
+
+Layout:
+
+```
+.claude-plugin/marketplace.json
+plugins/opencode/
+  .claude-plugin/plugin.json
+  commands/       # 7 slash commands
+  agents/         # opencode-rescue subagent
+  hooks/          # optional Stop review gate
+  scripts/        # opencode-companion.mjs + hook
+tests/
+```
+
+## License
+
+Apache-2.0.
