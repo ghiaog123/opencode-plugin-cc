@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { foldEvents, parseArgs, renderJob, reviewPrompt } from "../plugins/opencode/scripts/opencode-companion.mjs";
+import { foldEvents, logFile, parseArgs, renderJob, reviewPrompt } from "../plugins/opencode/scripts/opencode-companion.mjs";
 
 test("parseArgs splits flags, values, and free text", () => {
   const opts = parseArgs(["--background", "--base", "main", "-m", "opencode-go/kimi-k3", "look", "for", "races"]);
@@ -42,6 +42,13 @@ test("reviewPrompt targets branch diff only when a base is given", () => {
   assert.match(reviewPrompt("main", "", false), /git diff main\.\.\.HEAD/);
   assert.match(reviewPrompt(null, "", false), /uncommitted working tree/);
   assert.match(reviewPrompt(null, "auth", true), /ADVERSARIAL[\s\S]*focus from the user: auth/);
+});
+
+test("logFile rejects job ids that could escape the jobs directory", () => {
+  assert.throws(() => logFile("/tmp", "../escape"), /Invalid job id/);
+  assert.throws(() => logFile("/tmp", "a/b"), /Invalid job id/);
+  assert.throws(() => logFile("/tmp", "x".repeat(65)), /Invalid job id/);
+  assert.doesNotThrow(() => logFile("/tmp", "review-abc_123.4"));
 });
 
 test("renderJob shows the resume hint for completed jobs", () => {

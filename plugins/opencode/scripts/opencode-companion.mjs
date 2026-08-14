@@ -21,7 +21,7 @@ export function resolveStateDir(cwd) {
   const hash = createHash("sha256").update(real).digest("hex").slice(0, 16);
   const root = process.env.CLAUDE_PLUGIN_DATA
     ? path.join(process.env.CLAUDE_PLUGIN_DATA, "state")
-    : path.join(os.tmpdir(), "opencode-companion");
+    : path.join(os.homedir(), ".opencode-companion");
   return path.join(root, `${slug}-${hash}`);
 }
 
@@ -29,7 +29,12 @@ function stateFile(cwd) {
   return path.join(resolveStateDir(cwd), "state.json");
 }
 
+const JOB_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
 export function logFile(cwd, jobId) {
+  if (!JOB_ID_RE.test(jobId)) {
+    throw new Error(`Invalid job id: ${jobId}`);
+  }
   return path.join(resolveStateDir(cwd), "jobs", `${jobId}.log`);
 }
 
@@ -43,7 +48,7 @@ function loadState(cwd) {
 }
 
 function saveState(cwd, state) {
-  fs.mkdirSync(path.join(resolveStateDir(cwd), "jobs"), { recursive: true });
+  fs.mkdirSync(path.join(resolveStateDir(cwd), "jobs"), { recursive: true, mode: 0o700 });
   const kept = state.jobs
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
     .slice(0, MAX_JOBS);
@@ -154,7 +159,7 @@ function buildRunArgs({ prompt, agent, model, variant, sessionId, resume }) {
 
 async function runJob(cwd, job) {
   const target = logFile(cwd, job.id);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   const stream = fs.createWriteStream(target);
   const child = spawn(opencodeBin(), buildRunArgs(job), {
     cwd,
