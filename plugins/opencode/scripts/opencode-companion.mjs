@@ -8,7 +8,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const MAX_JOBS = 30;
+const RETENTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_FINISHED_JOBS = 50;
+const FINISHED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 // ---------------------------------------------------------------- state
 
@@ -47,17 +49,33 @@ function loadState(cwd) {
   }
 }
 
+function finishedTime(job) {
+  const ms = Date.parse(job.finishedAt ?? job.updatedAt);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+export function prune(cwd, jobs, now = Date.now()) {
+  const active = jobs.filter((job) => !FINISHED_STATUSES.has(job.status));
+  const finished = jobs
+    .filter((job) => FINISHED_STATUSES.has(job.status))
+    .sort((a, b) => finishedTime(b) - finishedTime(a));
+  const cutoff = now - RETENTION_WINDOW_MS;
+  const kept = [];
+  for (const job of finished) {
+    if (kept.length >= MAX_FINISHED_JOBS || finishedTime(job) < cutoff) {
+      try {
+        fs.unlinkSync(logFile(cwd, job.id));
+      } catch {}
+    } else {
+      kept.push(job);
+    }
+  }
+  return [...active, ...kept];
+}
+
 function saveState(cwd, state) {
   fs.mkdirSync(path.join(resolveStateDir(cwd), "jobs"), { recursive: true, mode: 0o700 });
-  const kept = state.jobs
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-    .slice(0, MAX_JOBS);
-  for (const job of state.jobs.slice(MAX_JOBS)) {
-    try {
-      fs.unlinkSync(logFile(cwd, job.id));
-    } catch {}
-  }
-  state.jobs = kept;
+  state.jobs = prune(cwd, state.jobs);
   fs.writeFileSync(stateFile(cwd), `${JSON.stringify(state, null, 2)}\n`, "utf8");
   return state;
 }
