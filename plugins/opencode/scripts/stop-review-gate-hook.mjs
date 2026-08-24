@@ -4,7 +4,7 @@
 
 import { spawnSync } from "node:child_process";
 
-import { loadState } from "./opencode-companion.mjs";
+import { filterJobsForSession, loadState, SESSION_ID_ENV } from "./opencode-companion.mjs";
 
 const payload = await new Promise((resolve) => {
   let raw = "";
@@ -20,7 +20,19 @@ const payload = await new Promise((resolve) => {
 });
 
 const cwd = process.cwd();
-if (!loadState(cwd).config.stopReviewGate || payload.stop_hook_active) process.exit(0);
+const state = loadState(cwd);
+
+const sessionId = payload.session_id || process.env[SESSION_ID_ENV] || null;
+const runningJob = filterJobsForSession(state.jobs, sessionId).find(
+  (job) => job.status === "queued" || job.status === "running"
+);
+if (runningJob) {
+  process.stderr.write(
+    `opencode job \`${runningJob.id}\` is still running. Check \`/opencode:status\` and use \`/opencode:cancel ${runningJob.id}\` if you want to stop it before ending the session.\n`
+  );
+}
+
+if (!state.config.stopReviewGate || payload.stop_hook_active) process.exit(0);
 
 const dirty = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf8" });
 if (!dirty.stdout?.trim()) process.exit(0);

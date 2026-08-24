@@ -4,7 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { foldEvents, logFile, parseArgs, prune, renderJob, reviewPrompt } from "../plugins/opencode/scripts/opencode-companion.mjs";
+import {
+  filterJobsForSession,
+  foldEvents,
+  logFile,
+  loadState,
+  parseArgs,
+  prune,
+  removeSessionJobs,
+  renderJob,
+  resolveStateDir,
+  reviewPrompt
+} from "../plugins/opencode/scripts/opencode-companion.mjs";
 
 test("parseArgs splits flags, values, and free text", () => {
   const opts = parseArgs(["--background", "--base", "main", "-m", "opencode-go/kimi-k3", "look", "for", "races"]);
@@ -109,6 +120,37 @@ test("prune deletes log files for dropped jobs", () => {
     assert.deepEqual(prune(tmp, [stale, keep], now).map((job) => job.id), ["keep-1"]);
     assert.equal(fs.existsSync(logFile(tmp, "stale-1")), false);
     assert.equal(fs.existsSync(logFile(tmp, "keep-1")), true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("filterJobsForSession scopes jobs to the given Claude session", () => {
+  const jobs = [
+    { id: "a", claudeSessionId: "s1" },
+    { id: "b", claudeSessionId: "s2" },
+    { id: "c", claudeSessionId: "s1" }
+  ];
+  assert.deepEqual(filterJobsForSession(jobs, "s1").map((job) => job.id), ["a", "c"]);
+  assert.deepEqual(filterJobsForSession(jobs, null), jobs);
+});
+
+test("removeSessionJobs kills active jobs for the session and drops all its jobs from state", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "companion-"));
+  try {
+    const dir = resolveStateDir(tmp);
+    fs.mkdirSync(dir, { recursive: true });
+    const state = {
+      config: {},
+      jobs: [
+        { id: "keep-1", status: "completed", claudeSessionId: "other", finishedAt: new Date().toISOString() },
+        { id: "drop-1", status: "completed", claudeSessionId: "s1", finishedAt: new Date().toISOString() },
+        { id: "drop-running", status: "running", pid: 999999, claudeSessionId: "s1" }
+      ]
+    };
+    fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(state), "utf8");
+    removeSessionJobs(tmp, "s1");
+    assert.deepEqual(loadState(tmp).jobs.map((job) => job.id), ["keep-1"]);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

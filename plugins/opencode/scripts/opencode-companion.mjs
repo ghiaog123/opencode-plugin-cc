@@ -11,6 +11,33 @@ import path from "node:path";
 const RETENTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_FINISHED_JOBS = 50;
 const FINISHED_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["queued", "running"]);
+
+export const SESSION_ID_ENV = "OPENCODE_COMPANION_SESSION_ID";
+
+// Jobs are tagged with the Claude session that started them (see
+// session-lifecycle-hook.mjs). Scoping status/result/cancel to that session
+// keeps concurrent Claude sessions in the same repo from seeing each other's jobs.
+export function filterJobsForSession(jobs, sessionId) {
+  if (!sessionId) return jobs;
+  return jobs.filter((job) => job.claudeSessionId === sessionId);
+}
+
+export function removeSessionJobs(cwd, sessionId) {
+  if (!sessionId) return;
+  const state = loadState(cwd);
+  const mine = state.jobs.filter((job) => job.claudeSessionId === sessionId);
+  if (!mine.length) return;
+  for (const job of mine) {
+    if (ACTIVE_STATUSES.has(job.status) && job.pid) {
+      try {
+        process.kill(job.pid);
+      } catch {}
+    }
+  }
+  state.jobs = state.jobs.filter((job) => job.claudeSessionId !== sessionId);
+  saveState(cwd, state);
+}
 
 // ---------------------------------------------------------------- state
 
@@ -312,7 +339,7 @@ async function start(kind, opts, prompt) {
     sessionId: opts.flags["resume-last"] ? latestSession(cwd) : null,
     status: "queued",
     createdAt: new Date().toISOString(),
-    claudeSessionId: process.env.CLAUDE_SESSION_ID ?? null
+    claudeSessionId: process.env[SESSION_ID_ENV] ?? null
   };
 
   if (opts.flags.background && !opts.flags["job-id"]) {
@@ -331,7 +358,8 @@ function latestSession(cwd) {
 function pickJob(cwd, id) {
   const jobs = loadState(cwd).jobs;
   if (id) return jobs.find((job) => job.id === id);
-  return jobs.find((job) => job.status === "completed" || job.status === "failed") ?? jobs[0];
+  const scoped = filterJobsForSession(jobs, process.env[SESSION_ID_ENV] ?? null);
+  return scoped.find((job) => job.status === "completed" || job.status === "failed") ?? scoped[0];
 }
 
 async function main() {
@@ -359,16 +387,17 @@ async function main() {
         const job = jobs.find((candidate) => candidate.id === id);
         return process.stdout.write(job ? renderJob(job) : `No job \`${id}\`.\n`);
       }
-      return process.stdout.write(`${renderStatus(cwd, jobs)}\n`);
+      const scoped = filterJobsForSession(jobs, process.env[SESSION_ID_ENV] ?? null);
+      return process.stdout.write(`${renderStatus(cwd, scoped)}\n`);
     }
     case "result": {
       const job = pickJob(cwd, opts.text[0]);
       return process.stdout.write(job ? renderJob(job) : "No opencode jobs yet.\n");
     }
     case "cancel": {
-      const job = loadState(cwd).jobs.find(
-        (candidate) => (opts.text[0] ? candidate.id === opts.text[0] : candidate.status === "running")
-      );
+      const id = opts.text[0];
+      const pool = id ? loadState(cwd).jobs : filterJobsForSession(loadState(cwd).jobs, process.env[SESSION_ID_ENV] ?? null);
+      const job = pool.find((candidate) => (id ? candidate.id === id : candidate.status === "running"));
       if (!job?.pid) return process.stdout.write("No running opencode job to cancel.\n");
       try {
         process.kill(job.pid);
