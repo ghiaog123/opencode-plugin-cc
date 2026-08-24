@@ -1,7 +1,6 @@
 ---
 description: Run an opencode review that challenges the implementation approach and design choices
 argument-hint: '[--wait|--background] [--base <ref>] [--model <provider/model>] [focus ...]'
-disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 

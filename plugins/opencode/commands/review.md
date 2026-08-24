@@ -1,7 +1,6 @@
 ---
 description: Run an opencode code review against local git state
 argument-hint: '[--wait|--background] [--base <ref>] [--model <provider/model>] [--variant <effort>]'
-disable-model-invocation: true
 allowed-tools: Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 

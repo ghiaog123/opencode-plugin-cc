@@ -1,7 +1,6 @@
 ---
 description: Show the stored final output for a finished opencode job
 argument-hint: '[job-id]'
-disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
